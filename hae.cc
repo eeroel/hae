@@ -35,8 +35,15 @@
 #include <sstream>
 #include <string>
 
+#include <thread>
+#include <future>
+
+#include "hae.h"
+//#include "model.h" // TODO uncomment
+
 using tokenizers::Tokenizer;
 
+/*
 std::string LoadBytesFromFile(const std::string& path) {
   std::ifstream fs(path, std::ios::in | std::ios::binary);
   if (fs.fail()) {
@@ -50,7 +57,7 @@ std::string LoadBytesFromFile(const std::string& path) {
   data.resize(size);
   fs.read(data.data(), size);
   return data;
-}
+}*/
 
 
 template <typename T>
@@ -61,38 +68,16 @@ Ort::Value vec_to_tensor(std::vector<T>& data, const std::vector<std::int64_t>& 
   return tensor;
 }
 
-void infer(std::vector<int>& ids) {
-  //*************************************************************************
-  // print model input layer (node names, types, shape etc.)
-  //Ort::AllocatorWithDefaultOptions allocator;
-  /* TODO call session.Run with
-  input_names – Array of null terminated strings of length input_count that is the list of input names
-  input_values – Array of Value objects of length input_count that is the list of input values
-  input_count – Number of inputs (the size of the input_names & input_values arrays)
-  output_names – Array of C style strings of length output_count that is the list of output names
-  output_count – Number of outputs (the size of the output_names array)
-  */
-
-  //session.Run(
-}
-
-// pretty prints a shape dimension vector
-std::string print_shape(const std::vector<std::int64_t>& v) {
-  std::stringstream ss("");
-  for (std::size_t i = 0; i < v.size() - 1; i++) ss << v[i] << "x";
-  ss << v[v.size() - 1];
-  return ss.str();
-}
 
 int main(int argc, char* argv[]) {
   auto start = std::chrono::high_resolution_clock::now();
 
   // Read blob from file.
-  auto blob = LoadBytesFromFile("tokenizer.json"); // TODO embed this!
+  //auto tokenizer_json = LoadBytesFromFile("tokenizer.json"); // TODO embed this!
 
   // Note: all the current factory APIs takes in-memory blob as input.
   // This gives some flexibility on how these blobs can be read.
-  auto tok = Tokenizer::FromBlobJSON(blob);
+  auto tok = Tokenizer::FromBlobJSON(tokenizer_json);
 
   Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "test");
   const auto& api = Ort::GetApi();
@@ -107,22 +92,21 @@ int main(int argc, char* argv[]) {
 #else
   const char* model_path = "all-MiniLM-L6-v2.onnx";
 #endif
-  Ort::Session session(env, model_path, session_options);
 
+  // NOTE: for dev we load model from file, but for release we should embed it
+  Ort::Session session(env, model_path, session_options);
+  //Ort::Session session(env, all_MiniLM_L6_v2_onnx, sizeof(all_MiniLM_L6_v2_onnx), session_options); // TODO: uncomment
   // print name/shape of inputs
   Ort::AllocatorWithDefaultOptions allocator;
   std::vector<std::string> input_names;
   std::vector<std::int64_t> input_shapes;
   
-  std::cout << "Input Node Name/Shape (" << input_names.size() << "):" << std::endl;
   for (std::size_t i = 0; i < session.GetInputCount(); i++) {
     input_names.emplace_back(session.GetInputNameAllocated(i, allocator).get());
-    std::cout << input_names[i] << std::endl;
   }
 
     // print name/shape of outputs
   std::vector<std::string> output_names;
-  std::cout << "Output Node Name/Shape (" << output_names.size() << "):" << std::endl;
   for (std::size_t i = 0; i < session.GetOutputCount(); i++) {
     output_names.emplace_back(session.GetOutputNameAllocated(i, allocator).get());
   }
@@ -137,7 +121,8 @@ int main(int argc, char* argv[]) {
                  [&](const std::string& str) { return str.c_str(); });
 
 
-  auto ids = tok->Encode("This is a test");
+  auto ids = tok->Encode("text");
+
   std::vector<int64_t> token_ids;
   std::transform(ids.begin(), ids.end(),
                   std::back_inserter(token_ids),
@@ -147,19 +132,32 @@ int main(int argc, char* argv[]) {
 
   std::vector<Ort::Value> input_tensors;
 
-  auto input_shape = 128; // TODO get from tokenizer
+  auto input_shape = 128; // TODO store somewhere else?
 
   input_tensors.emplace_back(vec_to_tensor(token_ids, {1, input_shape})); // token ids
   input_tensors.emplace_back(vec_to_tensor(ones, {1, input_shape})); // attention mask
   input_tensors.emplace_back(vec_to_tensor(zeros, {1, input_shape})); // token type ids
 
-  auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
-                                      input_names_char.size(), output_names_char.data(), output_names_char.size());
+  std::vector<std::thread> threads;
+  std::vector<std::future<std::vector<Ort::Value>>> futures;
 
-  // Get pointer to output tensor float values
-  float* floatarr = output_tensors.front().GetTensorMutableData<float>();
-  // score the model, and print scores for first 5 classes
-  for (int i = 0; i < 384; i++) {
-    std::cout << floatarr[i] << ", ";
+  for(int i = 0; i < 1000; ++i) {
+    futures.emplace_back(
+        std::async([&]() {
+          Ort::RunOptions runOptions;
+          auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
+                                            input_names_char.size(), output_names_char.data(), output_names_char.size());
+          return output_tensors;
+        })
+      );
+  }
+
+  for(auto& fut : futures) {
+      auto tensor = fut.get();
+      float* floatarr = tensor.front().GetTensorMutableData<float>();
+      // score the model, and print scores for first 5 classes
+      /*for (int i = 0; i < 384; i++) {
+        std::cout << floatarr[i] << ", ";
+      }*/
   }
 }
