@@ -1,0 +1,3 @@
+[submodule "tokenizers-cpp"]
+	path = tokenizers-cpp
+	url = https://github.com/mlc-ai/tokenizers-cpp
