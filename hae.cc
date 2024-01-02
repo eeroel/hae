@@ -86,6 +86,7 @@ std::pair<std::vector<int>, std::vector<float>> calc_distances(
   std::iota(indices.begin(), indices.end(), 0);
   std::sort(indices.begin(), indices.end(), [&](const int &a, const int &b)
             { return distances[a] > distances[b]; });
+  std::sort(distances.begin(), distances.end());
   return std::make_pair(indices, distances);
 };
 
@@ -110,22 +111,23 @@ std::vector<std::string> split_chunks(const std::string &s)
 
 std::vector<std::string> combine_chunks(std::vector<std::string> &chunks, int64_t min_size) {
   // greedily combine successive chunks so that the resulting chunks are at least `min_size` long
-  std::vector<std::string> combined;
-  auto it = chunks.begin();
-  while (it != chunks.end()) {
-    int64_t size = (*it).size();
-    if (size < min_size) {
-      // skip this chunk, and the next one as well if it's short too
-      for (int i = 0; i < 2 && it != chunks.end(); ++i, ++it) {
-        size += (*it).size();
-        if (size >= min_size) break;
-      }
-    } else {
-      combined.push_back(*it);
-      it = chunks.erase(it);
+    std::vector<std::string> combined;
+
+    std::string buffer = "";
+    for (size_t i = 0; i < chunks.size(); ++i) {
+        buffer += chunks[i] + "\n";
+        // If the chunk has multiple lines, just append it
+        if (buffer.length() > min_size) {
+            combined.push_back(buffer.substr(0, buffer.length() - 1));
+            buffer.clear();
+            continue;
+        }
     }
-  }
-  return combined;
+    if (!buffer.empty()) {
+        combined.push_back(buffer.substr(0, buffer.length() - 1));
+    }
+
+    return combined;
 }
 
 std::vector<std::string> split_sentences(const std::string& text) {
@@ -148,7 +150,7 @@ std::vector<std::string> split_sentences(const std::string& text) {
 }
 
 
-std::vector<std::vector<int>> build_inputs(const std::string& d, std::unique_ptr<tokenizers::Tokenizer> tok) {
+std::vector<std::vector<int>> build_inputs(const std::string &d, std::unique_ptr<tokenizers::Tokenizer> &tok) {
     auto input_size = 128; // TODO take from header
     auto text_prefix = ""; // TODO same
     
@@ -201,6 +203,15 @@ Ort::Value vec_to_tensor(std::vector<T> &data, const std::vector<std::int64_t> &
   return tensor;
 }
 
+std::vector<int> tokenize(const std::string &s, std::unique_ptr<tokenizers::Tokenizer> &tok) {
+   auto tokens = tok->Encode(s);
+   int i = tokens.size();
+   while (i > 0 && tokens[i-1] == 0) {
+      --i;
+   }
+   return std::vector<int>(tokens.begin(), tokens.begin() + i);
+}
+
 int main(int argc, char *argv[])
 {
     argparse::ArgumentParser parser("hae");
@@ -208,7 +219,7 @@ int main(int argc, char *argv[])
     parser.add_argument("query").help("The query");
     parser.add_argument("-n").help("Number of results to return").scan<'i',int>().default_value(5);
     parser.add_argument("--num_candidates").help("Number of candidate chunks() to consider, default is 5*n").scan<'i',int>().default_value(-1);
-    parser.add_argument("-ml", "--min_length").help("Minimum chunk length in characters").scan<'i',int>().default_value(300);
+    parser.add_argument("-ml", "--min_length").help("Minimum chunk length in characters").scan<'i',int>().default_value(512);
     parser.add_argument("-j", "--json").help("Output in JSON format").default_value(false).implicit_value(true);
     parser.add_argument("-hl", "--highlight_only").help("Display only highlights").default_value(false).implicit_value(true);
     try {
@@ -227,14 +238,12 @@ int main(int argc, char *argv[])
     bool output_json = parser.get<bool>("--json");
     bool highlight_only = parser.get<bool>("--highlight_only");
 
+    // Read blob from file.
+    // auto tokenizer_json = LoadBytesFromFile("tokenizer.json"); // TODO embed this!
 
-
-  // Read blob from file.
-  // auto tokenizer_json = LoadBytesFromFile("tokenizer.json"); // TODO embed this!
-
-  // Note: all the current factory APIs takes in-memory blob as input.
-  // This gives some flexibility on how these blobs can be read.
-  auto tok = Tokenizer::FromBlobJSON(tokenizer_json);
+    // Note: all the current factory APIs takes in-memory blob as input.
+    // This gives some flexibility on how these blobs can be read.
+    auto tok = Tokenizer::FromBlobJSON(tokenizer_json);
 
   Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "test");
   const auto &api = Ort::GetApi();
@@ -284,51 +293,83 @@ int main(int argc, char *argv[])
   auto input_shape = 128;  // TODO store somewhere else?
   auto output_shape = 384; // TODO store somewhere else?
 
-  auto ids = tok->Encode("whales are dangerous");
+  // process non-json input
+  std::string input = read_all(); // from stdin
+  auto chunked = split_chunks(input);
+  auto combined = combine_chunks(chunked, min_length);
 
-  std::vector<int64_t> token_ids;
-  std::transform(ids.begin(), ids.end(),
-                 std::back_inserter(token_ids),
-                 [](int32_t i)
-                 { return static_cast<int64_t>(i); });
-  std::vector<int64_t> zeros(token_ids.size(), 0);
-  std::vector<int64_t> ones(token_ids.size(), 1);
+  std::vector<std::vector<std::vector<int>>> inputs;
+  for (auto &c : combined) {
+      auto input = build_inputs(c, tok);
+      inputs.push_back(input);
+  }
 
-  std::vector<std::thread> threads;
-  std::vector<std::future<std::vector<Ort::Value>>> futures;
+  std::vector<std::vector<std::future<std::vector<Ort::Value>>>> futures;
 
-  for (int i = 0; i < 10; ++i)
+  for (auto &sub_chunks: inputs)
   {
-    futures.emplace_back(
-        std::async([&]()
-                   {
-        Ort::RunOptions runOptions;
+    std::vector<std::future<std::vector<Ort::Value>>> subfutures;
+    for (auto &ids: sub_chunks)
+    {
+      subfutures.emplace_back(
+          std::async([&]()
+            {
+              Ort::RunOptions runOptions;
+              long long input_shape = ids.size();
 
-        std::vector<Ort::Value> input_tensors;
-        input_tensors.emplace_back(vec_to_tensor(token_ids, {1, input_shape})); // token ids
-        input_tensors.emplace_back(vec_to_tensor(ones, {1, input_shape})); // attention mask
-        input_tensors.emplace_back(vec_to_tensor(zeros, {1, input_shape})); // token type ids
+              std::vector<int64_t> token_ids;
+              std::transform(ids.begin(), ids.end(),
+                            std::back_inserter(token_ids),
+                            [](int32_t i)
+                            { return static_cast<int64_t>(i); });
+              std::vector<int64_t> zeros(input_shape, 0);
+              std::vector<int64_t> ones(input_shape, 1);
 
-        auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
-                                          input_names_char.size(), output_names_char.data(), output_names_char.size());
-        return output_tensors; }));
+              std::vector<Ort::Value> input_tensors;
+              input_tensors.emplace_back(vec_to_tensor(token_ids, {1, input_shape})); // token ids
+              input_tensors.emplace_back(vec_to_tensor(ones, {1, input_shape})); // attention mask
+              input_tensors.emplace_back(vec_to_tensor(zeros, {1, input_shape})); // token type ids
+
+              auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
+                                                input_names_char.size(), output_names_char.data(), output_names_char.size());
+              return output_tensors;
+            })
+        );
+    }
+    futures.emplace_back(std::move(subfutures));
   }
 
   std::vector<std::vector<float>> vectors;
-  for (auto &fut : futures)
+  for (auto &subfut : futures)
   {
-    auto tensor = fut.get();
-    std::vector<float> v;
-    float *floatarr = tensor.front().GetTensorMutableData<float>();
-    // score the model, and print scores for first 5 classes
+    std::vector<float> averaged(output_shape, 0);
+    for (auto &fut : subfut)
+    {
+      auto tensor = fut.get();
+      std::vector<float> v;
+      float *floatarr = tensor.front().GetTensorMutableData<float>();
+      for (int i = 0; i < output_shape; i++)
+      {
+        v.emplace_back(floatarr[i]);
+      }
+
+      // add v elementwise to averaged
+      std::transform(v.begin(), v.end(), averaged.begin(), averaged.begin(), std::plus<float>());
+    }
+    // divide averaged by number of elements in subfutures
     for (int i = 0; i < output_shape; i++)
     {
-      v.emplace_back(floatarr[i]);
+      averaged[i] /= subfut.size();
     }
-    vectors.emplace_back(v);
+    vectors.emplace_back(averaged);
   }
 
-  auto query_ids = tok->Encode(query);
+  auto query_ids = tokenize(query, tok);
+  // truncate to max number of tokens
+  if (query_ids.size() > input_shape)
+  {
+    query_ids.resize(input_shape);
+  }
 
   std::vector<int64_t> query_token_ids;
   std::transform(query_ids.begin(), query_ids.end(),
@@ -341,9 +382,11 @@ int main(int argc, char *argv[])
   Ort::RunOptions runOptions;
 
   std::vector<Ort::Value> input_tensors;
-  input_tensors.emplace_back(vec_to_tensor(query_token_ids, {1, input_shape})); // token ids
-  input_tensors.emplace_back(vec_to_tensor(query_ones, {1, input_shape}));      // attention mask
-  input_tensors.emplace_back(vec_to_tensor(query_zeros, {1, input_shape}));     // token type ids
+  long long q_shape = query_token_ids.size();
+
+  input_tensors.emplace_back(vec_to_tensor(query_token_ids, {1, q_shape})); // token ids
+  input_tensors.emplace_back(vec_to_tensor(query_ones, {1, q_shape}));      // attention mask
+  input_tensors.emplace_back(vec_to_tensor(query_zeros, {1, q_shape}));     // token type ids
 
   auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
                                     input_names_char.size(), output_names_char.data(), output_names_char.size());
@@ -356,8 +399,10 @@ int main(int argc, char *argv[])
   }
 
   auto foo = calc_distances(v, vectors);
-  for (int i = 0; i < foo.first.size(); i++)
+
+  for (int i = 0; i < std::min(num_results, static_cast<int>(foo.first.size())); i++)
   {
-    std::cout << foo.first[i] << ", " << foo.second[i] << std::endl;
+    std::cout << foo.first[i] << std::endl;
+    std::cout << combined[foo.first[i]] << std::endl;
   }
 }
