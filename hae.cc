@@ -1,8 +1,5 @@
 // TODO:
-// - chunking
-// - overlap-averaging of too large chunks
 // - highlighting logic
-// - cli
 // - json i/o
 
 /*

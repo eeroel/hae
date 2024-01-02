@@ -1,8 +1,3 @@
-# Example Project
+# Hae
 
-This is an example cmake project to use tokenizers-cpp
-
-
-```bash
-./build_and_run.sh
-```
+A command line tool for semantic searches over text input.
