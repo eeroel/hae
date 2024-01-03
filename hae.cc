@@ -1,5 +1,4 @@
 // TODO:
-// - highlighting logic
 // - json i/o
 // - cleanup
 // - verify results against python
@@ -85,7 +84,8 @@ std::pair<std::vector<int>, std::vector<float>> calc_distances(
   std::iota(indices.begin(), indices.end(), 0);
   std::sort(indices.begin(), indices.end(), [&](const int &a, const int &b)
             { return distances[a] > distances[b]; });
-  std::sort(distances.begin(), distances.end());
+  std::sort(distances.begin(), distances.end(), [&](const float &a, const float &b)
+            { return a > b; });
   return std::make_pair(indices, distances);
 };
 
@@ -93,8 +93,10 @@ std::pair<std::vector<int>, std::vector<float>> calc_distances(
 // a function to read all data from stdin into a string:
 std::string read_all()
 {
+    std::ios::sync_with_stdio(false);
     std::stringstream ss;
     std::string s;
+    
     while (std::getline(std::cin, s)) {
         ss << s << '\n';
     }
@@ -130,11 +132,12 @@ std::vector<std::string> combine_chunks(std::vector<std::string> &chunks, int64_
 }
 
 std::vector<std::string> split_sentences(const std::string& text) {
-    std::regex wiki_citation_re("(\\^\\[[0-9]+\\])*");
+    std::string wiki_citation_re = "(\\\\^\\[[0-9]+\\])*";
+    std::regex full_re(":\\n" + wiki_citation_re + "|[.!?]" + wiki_citation_re + "\\s");
     size_t prev = 0;
     std::vector<std::string> sentences;
 
-    for (auto x = std::sregex_iterator(text.begin(), text.end(), wiki_citation_re);
+    for (auto x = std::sregex_iterator(text.begin(), text.end(), full_re);
          x != std::sregex_iterator(); ++x) {
         auto span = x->position() + x->length();
         sentences.push_back(text.substr(prev, span - prev));
@@ -149,10 +152,19 @@ std::vector<std::string> split_sentences(const std::string& text) {
 }
 
 
+std::vector<int> tokenize(const std::string &s, std::unique_ptr<tokenizers::Tokenizer> &tok) {
+   auto tokens = tok->Encode(s);
+   int i = tokens.size();
+   while (i > 0 && tokens[i-1] == 0) {
+      --i;
+   }
+   return std::vector<int>(tokens.begin(), tokens.begin() + i);
+}
+
 std::vector<std::vector<int>> build_inputs(const std::string &d, std::unique_ptr<tokenizers::Tokenizer> &tok) {
     auto text_prefix = ""; // TODO same
     
-    std::vector<int> enc = tok->Encode(text_prefix + d);
+    std::vector<int> enc = tokenize(text_prefix + d, tok);
     std::vector<int> tokens(enc.begin(), enc.end());
 
     // max input size handling: average overlapping chunks
@@ -160,9 +172,8 @@ std::vector<std::vector<int>> build_inputs(const std::string &d, std::unique_ptr
 
     std::vector<std::vector<int>> inputs;
 
-    if (num_tokens % input_size == 0) {
-        int64_t start = 0;
-        inputs.push_back({tokens.begin() + start, tokens.begin() + start + input_size});
+    if (num_tokens < input_size) {
+      inputs.push_back({tokens.begin(), tokens.begin() + num_tokens});
     } else {
         for (int64_t start = 0; start < num_tokens; start += static_cast<int>(input_size*0.9)) {
             if (start >= num_tokens) {
@@ -199,15 +210,6 @@ Ort::Value vec_to_tensor(std::vector<T> &data, const std::vector<std::int64_t> &
       Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
   auto tensor = Ort::Value::CreateTensor<T>(mem_info, data.data(), data.size(), shape.data(), shape.size());
   return tensor;
-}
-
-std::vector<int> tokenize(const std::string &s, std::unique_ptr<tokenizers::Tokenizer> &tok) {
-   auto tokens = tok->Encode(s);
-   int i = tokens.size();
-   while (i > 0 && tokens[i-1] == 0) {
-      --i;
-   }
-   return std::vector<int>(tokens.begin(), tokens.begin() + i);
 }
 
 std::vector<Ort::Value> run_onnx(
@@ -248,91 +250,15 @@ std::vector<float> to_vector(std::vector<Ort::Value> &tensor) {
   return v;
 }
 
-int main(int argc, char *argv[])
-{
-    argparse::ArgumentParser parser("hae");
-    // Assuming `parser` is an existing object
-    parser.add_argument("query").help("The query");
-    parser.add_argument("-n").help("Number of results to return").scan<'i',int>().default_value(5);
-    parser.add_argument("--num_candidates").help("Number of candidate chunks() to consider, default is 5*n").scan<'i',int>().default_value(-1);
-    parser.add_argument("-ml", "--min_length").help("Minimum chunk length in characters").scan<'i',int>().default_value(512);
-    parser.add_argument("-j", "--json").help("Output in JSON format").default_value(false).implicit_value(true);
-    parser.add_argument("-hl", "--highlight_only").help("Display only highlights").default_value(false).implicit_value(true);
-    try {
-      parser.parse_args(argc, argv);   // Example: ./main --input_files config.yml System.xml
-    }
-    catch (const std::exception& err) {
-      std::cerr << err.what() << std::endl;
-      std::cerr << parser;
-      std::exit(1);
-    }
-
-    int num_results = parser.get<int>("-n");
-    int top_k = parser.get<int>("--num_candidates") ? parser.get<int>("--num_candidates") : 5 * num_results;
-    std::string query = parser.get("query");
-    int min_length = parser.get<int>("--min_length");
-    bool output_json = parser.get<bool>("--json");
-    bool highlight_only = parser.get<bool>("--highlight_only");
-
-    // Read blob from file.
-    // auto tokenizer_json = LoadBytesFromFile("tokenizer.json"); // TODO embed this!
-
-    // Note: all the current factory APIs takes in-memory blob as input.
-    // This gives some flexibility on how these blobs can be read.
-    auto tok = Tokenizer::FromBlobJSON(tokenizer_json);
-
-  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "test");
-  const auto &api = Ort::GetApi();
-
-  Ort::SessionOptions session_options;
-  session_options.SetIntraOpNumThreads(3);
-
-  session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
-
-#ifdef _WIN32
-  const wchar_t *model_path = L"all-MiniLM-L6-v2.onnx";
-#else
-  const char *model_path = "all-MiniLM-L6-v2.onnx";
-#endif
-
-  // NOTE: for dev we load model from file, but for release we should embed it
-  Ort::Session session(env, model_path, session_options);
-  // Ort::Session session(env, all_MiniLM_L6_v2_onnx, sizeof(all_MiniLM_L6_v2_onnx), session_options); // TODO: uncomment
-  //  print name/shape of inputs
-  Ort::AllocatorWithDefaultOptions allocator;
-  std::vector<std::string> input_names;
-  std::vector<std::int64_t> input_shapes;
-
-  for (std::size_t i = 0; i < session.GetInputCount(); i++)
-  {
-    input_names.emplace_back(session.GetInputNameAllocated(i, allocator).get());
-  }
-
-  // print name/shape of outputs
-  std::vector<std::string> output_names;
-  for (std::size_t i = 0; i < session.GetOutputCount(); i++)
-  {
-    output_names.emplace_back(session.GetOutputNameAllocated(i, allocator).get());
-  }
-
-  // pass data through model
-  std::vector<const char *> input_names_char(input_names.size(), nullptr);
-  std::transform(std::begin(input_names), std::end(input_names), std::begin(input_names_char),
-                 [&](const std::string &str)
-                 { return str.c_str(); });
-
-  std::vector<const char *> output_names_char(output_names.size(), nullptr);
-  std::transform(std::begin(output_names), std::end(output_names), std::begin(output_names_char),
-                 [&](const std::string &str)
-                 { return str.c_str(); });
-
-  // process non-json input
-  std::string input = read_all(); // from stdin
-  auto chunked = split_chunks(input);
-  auto combined = combine_chunks(chunked, min_length);
-
+std::vector<std::vector<float>> vectorize_all(
+  std::vector<std::string> &input,
+  std::vector<const char *> &input_names_char,
+  std::vector<const char *> &output_names_char,
+  std::unique_ptr<tokenizers::Tokenizer> &tok,
+  Ort::Session &session
+  ) {
   std::vector<std::vector<std::vector<int>>> inputs;
-  for (auto &c : combined) {
+  for (auto &c : input) {
       auto input = build_inputs(c, tok);
       inputs.push_back(input);
   }
@@ -373,6 +299,91 @@ int main(int argc, char *argv[])
     }
     vectors.emplace_back(averaged);
   }
+  return vectors;
+}
+
+int main(int argc, char *argv[])
+{
+    argparse::ArgumentParser parser("hae");
+    // Assuming `parser` is an existing object
+    parser.add_argument("query").help("The query");
+    parser.add_argument("-n").help("Number of results to return").scan<'i',int>().default_value(5);
+    parser.add_argument("--num_candidates").help("Number of candidate chunks() to consider, default is 5*n").scan<'i',int>().default_value(-1);
+    parser.add_argument("-ml", "--min_length").help("Minimum chunk length in characters").scan<'i',int>().default_value(512);
+    parser.add_argument("-j", "--json").help("Output in JSON format").default_value(false).implicit_value(true);
+    parser.add_argument("-hl", "--highlight_only").help("Display only highlights").default_value(false).implicit_value(true);
+    try {
+      parser.parse_args(argc, argv);   // Example: ./main --input_files config.yml System.xml
+    }
+    catch (const std::exception& err) {
+      std::cerr << err.what() << std::endl;
+      std::cerr << parser;
+      std::exit(1);
+    }
+
+    int num_results = parser.get<int>("-n");
+    int top_k = parser.get<int>("--num_candidates") > 0 ? parser.get<int>("--num_candidates") : 5 * num_results;
+    std::string query = parser.get("query");
+    int min_length = parser.get<int>("--min_length");
+    bool output_json = parser.get<bool>("--json");
+    bool highlight_only = parser.get<bool>("--highlight_only");
+
+    // Read blob from file.
+    // auto tokenizer_json = LoadBytesFromFile("tokenizer.json"); // TODO embed this!
+
+    // Note: all the current factory APIs takes in-memory blob as input.
+    // This gives some flexibility on how these blobs can be read.
+    auto tok = Tokenizer::FromBlobJSON(tokenizer_json);
+
+  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "test");
+  const auto &api = Ort::GetApi();
+
+  Ort::SessionOptions session_options;
+  session_options.SetIntraOpNumThreads(3);
+  session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+
+#ifdef _WIN32
+  const wchar_t *model_path = L"all-MiniLM-L6-v2.onnx";
+#else
+  const char *model_path = "all-MiniLM-L6-v2.onnx";
+#endif
+
+  // NOTE: for dev we load model from file  , but for release we should embed it
+  Ort::Session session(env, model_path, session_options);
+  // Ort::Session session(env, all_MiniLM_L6_v2_onnx, sizeof(all_MiniLM_L6_v2_onnx), session_options); // TODO: uncomment
+  //  print name/shape of inputs
+  Ort::AllocatorWithDefaultOptions allocator;
+  std::vector<std::string> input_names;
+  std::vector<std::int64_t> input_shapes;
+
+  for (std::size_t i = 0; i < session.GetInputCount(); i++)
+  {
+    input_names.emplace_back(session.GetInputNameAllocated(i, allocator).get());
+  }
+
+  // print name/shape of outputs
+  std::vector<std::string> output_names;
+  for (std::size_t i = 0; i < session.GetOutputCount(); i++)
+  {
+    output_names.emplace_back(session.GetOutputNameAllocated(i, allocator).get());
+  }
+
+  // pass data through model
+  std::vector<const char *> input_names_char(input_names.size(), nullptr);
+  std::transform(std::begin(input_names), std::end(input_names), std::begin(input_names_char),
+                 [&](const std::string &str)
+                 { return str.c_str(); });
+
+  std::vector<const char *> output_names_char(output_names.size(), nullptr);
+  std::transform(std::begin(output_names), std::end(output_names), std::begin(output_names_char),
+                 [&](const std::string &str)
+                 { return str.c_str(); });
+
+  // process non-json input
+  std::string input = read_all(); // from stdin
+  auto chunked = split_chunks(input);
+  auto combined = combine_chunks(chunked, min_length);
+  auto vectors = vectorize_all(combined, input_names_char, output_names_char, tok, session);
 
   auto query_ids = tokenize(query, tok);
   // truncate to max number of tokens
@@ -382,13 +393,84 @@ int main(int argc, char *argv[])
   }
 
   auto output_tensors = run_onnx(query_ids, input_names_char, output_names_char, session);
-  auto v = to_vector(output_tensors);
+  auto v_query = to_vector(output_tensors);
 
-  auto distances = calc_distances(v, vectors);
+  auto distances = calc_distances(v_query, vectors);
 
-  for (int i = 0; i < std::min(top_k, static_cast<int>(distances.first.size())); i++)
-  {
-    std::cout << distances.first[i] << std::endl;
-    std::cout << combined[distances.first[i]] << std::endl;
+  // Calculate highlights
+  std::vector<float> highlight_scores;
+  std::vector<std::string> highlights;
+  std::vector<std::string> selected_chunks;
+
+  for (size_t i = 0; i < std::min(static_cast<size_t>(top_k), distances.first.size()); ++i) {
+      auto chunk = combined[distances.first[i]];
+      selected_chunks.push_back(chunk);
+  }
+
+  std::vector<std::string> sentences{};
+  std::vector<int> chunk_ids;
+
+  for (size_t i = 0; i < std::min(static_cast<size_t>(top_k), distances.first.size()); ++i) {
+      auto chunk = selected_chunks[i];
+      // Do another round of search within the text, splitting on sentences
+      for (const auto& x : split_sentences(chunk)) {
+        if (x.size() > 3) { // TODO better logic/do size filtering somewhere else?
+          sentences.push_back(x);
+          chunk_ids.push_back(i);
+        }
+      }
+  }
+
+  std::vector<std::vector<float>> sentence_vectors = vectorize_all(sentences, input_names_char, output_names_char, tok, session);
+  
+  // iterate sentence_vectors grouped by chunk_ids:
+  for (size_t i = 0; i <= *std::max_element(std::begin(chunk_ids), std::end(chunk_ids)); ++i) {
+    std::vector<std::vector<float>> vecs;
+    std::vector<std::string> sents;
+    for (int j = 0; j < sentence_vectors.size(); ++j) {
+        if (chunk_ids[j] == i) {
+            vecs.push_back(sentence_vectors[j]);
+            sents.push_back(sentences[j]);
+        }
+    }
+    auto dists = calc_distances(v_query, vecs);
+    highlight_scores.push_back(dists.second[0]);
+    highlights.push_back(sents[dists.first[0]]);
+  }
+
+  // sort highlight_scores and reorder highlights by the same sort:
+  std::vector<std::pair<float, int>> sorted_highlight_scores;
+  for (int i = 0; i < highlight_scores.size(); ++i) {
+    sorted_highlight_scores.push_back(std::make_pair(highlight_scores[i], i));
+  }
+
+  std::sort(sorted_highlight_scores.begin(), sorted_highlight_scores.end(), [](auto &left, auto &right) {
+    return left.first > right.first;
+  });
+
+  std::vector<float> sorted_highlights_scores;
+  std::vector<std::string> sorted_highlights;
+  std::vector<std::string> sorted_selected_chunks;
+
+  for (int i = 0; i < highlight_scores.size(); ++i) {
+    sorted_highlights_scores.push_back(sorted_highlight_scores[i].first);
+    sorted_highlights.push_back(highlights[sorted_highlight_scores[i].second]);
+    sorted_selected_chunks.push_back(selected_chunks[sorted_highlight_scores[i].second]);
+  }
+  
+  for (int i = 0; i < num_results; i++) {
+      auto content = sorted_selected_chunks[i];
+      auto highlight = sorted_highlights[i];
+      if (highlight_only) {
+          std::cout << highlight << std::endl << std::endl;
+      } else {
+        size_t pos = 0;
+        pos = content.find(highlight, pos);
+        auto highlighted = content;
+        if (pos != std::string::npos) {
+            highlighted = content.replace(pos, highlight.length(), std::string("\033[1m" + highlight + "\033[0m"));
+        }
+        std::cout << highlighted << std::endl << std::endl;
+    }
   }
 }
