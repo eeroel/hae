@@ -1,6 +1,8 @@
 // TODO:
 // - highlighting logic
 // - json i/o
+// - cleanup
+// - verify results against python
 
 /*
     Modified from https://github.com/microsoft/onnxruntime-inference-examples
@@ -148,7 +150,6 @@ std::vector<std::string> split_sentences(const std::string& text) {
 
 
 std::vector<std::vector<int>> build_inputs(const std::string &d, std::unique_ptr<tokenizers::Tokenizer> &tok) {
-    auto input_size = 128; // TODO take from header
     auto text_prefix = ""; // TODO same
     
     std::vector<int> enc = tok->Encode(text_prefix + d);
@@ -207,6 +208,33 @@ std::vector<int> tokenize(const std::string &s, std::unique_ptr<tokenizers::Toke
       --i;
    }
    return std::vector<int>(tokens.begin(), tokens.begin() + i);
+}
+
+std::vector<Ort::Value> run_onnx(
+  std::vector<int> &input,
+  std::vector<const char *> &input_names_char,
+  std::vector<const char *> &output_names_char,
+  Ort::Session &session
+) {
+    Ort::RunOptions runOptions;
+    long long input_shape = input.size();
+
+    std::vector<int64_t> token_ids;
+    std::transform(input.begin(), input.end(),
+                  std::back_inserter(token_ids),
+                  [](int32_t i)
+                  { return static_cast<int64_t>(i); });
+    std::vector<int64_t> zeros(input_shape, 0);
+    std::vector<int64_t> ones(input_shape, 1);
+
+    std::vector<Ort::Value> input_tensors;
+    input_tensors.emplace_back(vec_to_tensor(token_ids, {1, input_shape})); // token ids
+    input_tensors.emplace_back(vec_to_tensor(ones, {1, input_shape})); // attention mask
+    input_tensors.emplace_back(vec_to_tensor(zeros, {1, input_shape})); // token type ids
+
+    auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
+                                      input_names_char.size(), output_names_char.data(), output_names_char.size());
+    return output_tensors;
 }
 
 int main(int argc, char *argv[])
@@ -287,9 +315,6 @@ int main(int argc, char *argv[])
                  [&](const std::string &str)
                  { return str.c_str(); });
 
-  auto input_shape = 128;  // TODO store somewhere else?
-  auto output_shape = 384; // TODO store somewhere else?
-
   // process non-json input
   std::string input = read_all(); // from stdin
   auto chunked = split_chunks(input);
@@ -311,25 +336,7 @@ int main(int argc, char *argv[])
       subfutures.emplace_back(
           std::async([&]()
             {
-              Ort::RunOptions runOptions;
-              long long input_shape = ids.size();
-
-              std::vector<int64_t> token_ids;
-              std::transform(ids.begin(), ids.end(),
-                            std::back_inserter(token_ids),
-                            [](int32_t i)
-                            { return static_cast<int64_t>(i); });
-              std::vector<int64_t> zeros(input_shape, 0);
-              std::vector<int64_t> ones(input_shape, 1);
-
-              std::vector<Ort::Value> input_tensors;
-              input_tensors.emplace_back(vec_to_tensor(token_ids, {1, input_shape})); // token ids
-              input_tensors.emplace_back(vec_to_tensor(ones, {1, input_shape})); // attention mask
-              input_tensors.emplace_back(vec_to_tensor(zeros, {1, input_shape})); // token type ids
-
-              auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
-                                                input_names_char.size(), output_names_char.data(), output_names_char.size());
-              return output_tensors;
+              run_onnx(ids, input_names_char, output_names_char, session);
             })
         );
     }
@@ -339,13 +346,13 @@ int main(int argc, char *argv[])
   std::vector<std::vector<float>> vectors;
   for (auto &subfut : futures)
   {
-    std::vector<float> averaged(output_shape, 0);
+    std::vector<float> averaged(output_size, 0);
     for (auto &fut : subfut)
     {
       auto tensor = fut.get();
       std::vector<float> v;
       float *floatarr = tensor.front().GetTensorMutableData<float>();
-      for (int i = 0; i < output_shape; i++)
+      for (int i = 0; i < output_size; i++)
       {
         v.emplace_back(floatarr[i]);
       }
@@ -354,7 +361,7 @@ int main(int argc, char *argv[])
       std::transform(v.begin(), v.end(), averaged.begin(), averaged.begin(), std::plus<float>());
     }
     // divide averaged by number of elements in subfutures
-    for (int i = 0; i < output_shape; i++)
+    for (int i = 0; i < output_size; i++)
     {
       averaged[i] /= subfut.size();
     }
@@ -363,43 +370,25 @@ int main(int argc, char *argv[])
 
   auto query_ids = tokenize(query, tok);
   // truncate to max number of tokens
-  if (query_ids.size() > input_shape)
+  if (query_ids.size() > input_size)
   {
-    query_ids.resize(input_shape);
+    query_ids.resize(input_size);
   }
-
-  std::vector<int64_t> query_token_ids;
-  std::transform(query_ids.begin(), query_ids.end(),
-                 std::back_inserter(query_token_ids),
-                 [](int32_t i)
-                 { return static_cast<int64_t>(i); });
-  std::vector<int64_t> query_zeros(query_token_ids.size(), 0);
-  std::vector<int64_t> query_ones(query_token_ids.size(), 1);
-
-  Ort::RunOptions runOptions;
-
-  std::vector<Ort::Value> input_tensors;
-  long long q_shape = query_token_ids.size();
-
-  input_tensors.emplace_back(vec_to_tensor(query_token_ids, {1, q_shape})); // token ids
-  input_tensors.emplace_back(vec_to_tensor(query_ones, {1, q_shape}));      // attention mask
-  input_tensors.emplace_back(vec_to_tensor(query_zeros, {1, q_shape}));     // token type ids
-
-  auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
-                                    input_names_char.size(), output_names_char.data(), output_names_char.size());
+  
+  auto output_tensors = run_onnx(query_ids, input_names_char, output_names_char, session);
   std::vector<float> v;
   float *floatarr = output_tensors.front().GetTensorMutableData<float>();
-  // score the model, and print scores for first 5 classes
-  for (int i = 0; i < output_shape; i++)
+
+  for (int i = 0; i < output_size; i++)
   {
     v.emplace_back(floatarr[i]);
   }
 
-  auto foo = calc_distances(v, vectors);
+  auto distances = calc_distances(v, vectors);
 
-  for (int i = 0; i < std::min(num_results, static_cast<int>(foo.first.size())); i++)
+  for (int i = 0; i < std::min(top_k, static_cast<int>(distances.first.size())); i++)
   {
-    std::cout << foo.first[i] << std::endl;
-    std::cout << combined[foo.first[i]] << std::endl;
+    std::cout << distances.first[i] << std::endl;
+    std::cout << combined[distances.first[i]] << std::endl;
   }
 }
