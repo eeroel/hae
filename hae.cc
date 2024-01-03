@@ -237,6 +237,17 @@ std::vector<Ort::Value> run_onnx(
     return output_tensors;
 }
 
+std::vector<float> to_vector(std::vector<Ort::Value> &tensor) {
+  std::vector<float> v;
+  float *floatarr = tensor.front().GetTensorMutableData<float>();
+
+  for (int i = 0; i < output_size; i++)
+  {
+    v.emplace_back(floatarr[i]);
+  }
+  return v;
+}
+
 int main(int argc, char *argv[])
 {
     argparse::ArgumentParser parser("hae");
@@ -336,7 +347,7 @@ int main(int argc, char *argv[])
       subfutures.emplace_back(
           std::async([&]()
             {
-              run_onnx(ids, input_names_char, output_names_char, session);
+              return run_onnx(ids, input_names_char, output_names_char, session);
             })
         );
     }
@@ -350,12 +361,7 @@ int main(int argc, char *argv[])
     for (auto &fut : subfut)
     {
       auto tensor = fut.get();
-      std::vector<float> v;
-      float *floatarr = tensor.front().GetTensorMutableData<float>();
-      for (int i = 0; i < output_size; i++)
-      {
-        v.emplace_back(floatarr[i]);
-      }
+      auto v = to_vector(tensor);
 
       // add v elementwise to averaged
       std::transform(v.begin(), v.end(), averaged.begin(), averaged.begin(), std::plus<float>());
@@ -374,15 +380,9 @@ int main(int argc, char *argv[])
   {
     query_ids.resize(input_size);
   }
-  
-  auto output_tensors = run_onnx(query_ids, input_names_char, output_names_char, session);
-  std::vector<float> v;
-  float *floatarr = output_tensors.front().GetTensorMutableData<float>();
 
-  for (int i = 0; i < output_size; i++)
-  {
-    v.emplace_back(floatarr[i]);
-  }
+  auto output_tensors = run_onnx(query_ids, input_names_char, output_names_char, session);
+  auto v = to_vector(output_tensors);
 
   auto distances = calc_distances(v, vectors);
 
