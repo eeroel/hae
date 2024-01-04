@@ -1,7 +1,3 @@
-// TODO:
-// - cleanup
-// - better handling on input size upper limit! currently tokenized vector size is fixed...
-
 /*
     Modified from https://github.com/microsoft/onnxruntime-inference-examples
     Original license:
@@ -50,7 +46,7 @@
 #include "hae.h"
 #include "argparse.hpp"
 
-// #include "model.h" // TODO uncomment
+#include "model.h" // TODO uncomment
 
 using tokenizers::Tokenizer;
 
@@ -145,7 +141,7 @@ std::vector<std::string> combine_chunks(std::vector<std::string> &chunks, int64_
 }
 
 std::vector<std::string> split_sentences(const std::string& text) {
-    std::string wiki_citation_re = "(\\\\^\\[[0-9]+\\])*";
+    std::string wiki_citation_re = "(\\^\\[[0-9]+\\])*";
     std::regex full_re(":\\n" + wiki_citation_re + "|[.!?]" + wiki_citation_re + "\\s");
     size_t prev = 0;
     std::vector<std::string> sentences;
@@ -198,23 +194,6 @@ std::vector<std::vector<int>> build_inputs(const std::string &d, std::unique_ptr
 
     return inputs;
 }
-
-
-/*
-std::string LoadBytesFromFile(const std::string& path) {
-  std::ifstream fs(path, std::ios::in | std::ios::binary);
-  if (fs.fail()) {
-    std::cerr << "Cannot open " << path << std::endl;
-    exit(1);
-  }
-  std::string data;
-  fs.seekg(0, std::ios::end);
-  size_t size = static_cast<size_t>(fs.tellg());
-  fs.seekg(0, std::ios::beg);
-  data.resize(size);
-  fs.read(data.data(), size);
-  return data;
-}*/
 
 template <typename T>
 Ort::Value vec_to_tensor(std::vector<T> &data, const std::vector<std::int64_t> &shape)
@@ -341,9 +320,6 @@ int main(int argc, char *argv[])
     bool output_json = parser.get<bool>("--json");
     bool highlight_only = parser.get<bool>("--highlight_only");
 
-    // Read blob from file.
-    // auto tokenizer_json = LoadBytesFromFile("tokenizer.json"); // TODO embed this!
-
     // Note: all the current factory APIs takes in-memory blob as input.
     // This gives some flexibility on how these blobs can be read.
     auto tok = Tokenizer::FromBlobJSON(tokenizer_json);
@@ -355,16 +331,7 @@ int main(int argc, char *argv[])
   session_options.SetIntraOpNumThreads(3);
   session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-#ifdef _WIN32
-  const wchar_t *model_path = L"all-MiniLM-L6-v2.onnx";
-#else
-  const char *model_path = "all-MiniLM-L6-v2.onnx";
-#endif
-
-  // NOTE: for dev we load model from file  , but for release we should embed it
-  Ort::Session session(env, model_path, session_options);
-  // Ort::Session session(env, all_MiniLM_L6_v2_onnx, sizeof(all_MiniLM_L6_v2_onnx), session_options); // TODO: uncomment
-  //  print name/shape of inputs
+  Ort::Session session(env, all_MiniLM_L6_v2_onnx, sizeof(all_MiniLM_L6_v2_onnx), session_options);
   Ort::AllocatorWithDefaultOptions allocator;
   std::vector<std::string> input_names;
   std::vector<std::int64_t> input_shapes;
@@ -492,7 +459,9 @@ int main(int argc, char *argv[])
     }
 
     if (vecs.size() == 0) {
-      highlight_scores.push_back(-10000); //
+      // if there's not a single sentence to highlight just push a small value so it will
+      // be at the tail
+      highlight_scores.push_back(-10000);
       highlights.push_back("");
     } else {
       auto dists = calc_distances(v_query, vecs);
