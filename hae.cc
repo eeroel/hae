@@ -55,12 +55,6 @@ struct InputDocument {
   std::string content;
 };
 
-struct OutputDocument {
-  std::string title;
-  std::string content;
-  std::string highlight;
-};
-
 // calculate cosine similarity between two float vectors:
 float cos_sim(const std::vector<float> &a, const std::vector<float> &b)
 {
@@ -204,6 +198,17 @@ Ort::Value vec_to_tensor(std::vector<T> &data, const std::vector<std::int64_t> &
   return tensor;
 }
 
+std::vector<float> tensor_to_vector(std::vector<Ort::Value> &tensor) {
+  std::vector<float> v;
+  float *floatarr = tensor.front().GetTensorMutableData<float>();
+
+  for (int i = 0; i < output_size; i++)
+  {
+    v.emplace_back(floatarr[i]);
+  }
+  return v;
+}
+
 std::vector<Ort::Value> run_onnx(
   std::vector<int> &input,
   std::vector<const char *> &input_names_char,
@@ -229,17 +234,6 @@ std::vector<Ort::Value> run_onnx(
     auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names_char.data(), input_tensors.data(),
                                       input_names_char.size(), output_names_char.data(), output_names_char.size());
     return output_tensors;
-}
-
-std::vector<float> to_vector(std::vector<Ort::Value> &tensor) {
-  std::vector<float> v;
-  float *floatarr = tensor.front().GetTensorMutableData<float>();
-
-  for (int i = 0; i < output_size; i++)
-  {
-    v.emplace_back(floatarr[i]);
-  }
-  return v;
 }
 
 std::vector<std::vector<float>> vectorize_all(
@@ -279,7 +273,7 @@ std::vector<std::vector<float>> vectorize_all(
     for (auto &fut : subfut)
     {
       auto tensor = fut.get();
-      auto v = to_vector(tensor);
+      auto v = tensor_to_vector(tensor);
 
       // add v elementwise to averaged
       std::transform(v.begin(), v.end(), averaged.begin(), averaged.begin(), std::plus<float>());
@@ -365,7 +359,6 @@ int main(int argc, char *argv[])
   std::vector<std::string> combined;
   bool json_input = true;
 
-  // NOTE: smart ptr would be preferable but it doesn't seem to work here
   std::vector<std::shared_ptr<rapidjson::Document>> json_docs;
   std::vector<InputDocument> docs;
   
@@ -387,12 +380,14 @@ int main(int argc, char *argv[])
     
     for (int i = 0; i < json_docs.size(); ++i) {
       rapidjson::Document& d = *json_docs[i];
+
+      // content is required
       if (!d.HasMember("content") || !d["content"].IsString()) {
         throw 1;
       }
-      std::string title = d.HasMember("title") ? std::string(d["title"].GetString()) : "";
+      std::string title = d.HasMember("title") && d["title"].IsString() ? std::string(d["title"].GetString()) : "";
       std::string content = std::string(d["content"].GetString());
-      // TODO handle case when title doesn't exist - content is required
+
       combined.push_back( title + "\\n" + content );
       docs_candidate.push_back(InputDocument{title, content});
     }
@@ -416,7 +411,7 @@ int main(int argc, char *argv[])
   }
 
   auto output_tensors = run_onnx(query_ids, input_names_char, output_names_char, session);
-  auto v_query = to_vector(output_tensors);
+  auto v_query = tensor_to_vector(output_tensors);
   auto distances = calc_distances(v_query, vectors);
 
   // Calculate highlights
