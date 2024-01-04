@@ -1,7 +1,6 @@
 // TODO:
-// - json i/o
 // - cleanup
-// - verify results against python
+// - better handling on input size upper limit! currently tokenized vector size is fixed...
 
 /*
     Modified from https://github.com/microsoft/onnxruntime-inference-examples
@@ -32,6 +31,9 @@
 
 #include <tokenizers_cpp.h>
 #include <onnxruntime_cxx_api.h>
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
 
 #include <cassert>
 #include <chrono>
@@ -51,6 +53,17 @@
 // #include "model.h" // TODO uncomment
 
 using tokenizers::Tokenizer;
+
+struct InputDocument {
+  std::string title;
+  std::string content;
+};
+
+struct OutputDocument {
+  std::string title;
+  std::string content;
+  std::string highlight;
+};
 
 // calculate cosine similarity between two float vectors:
 float cos_sim(const std::vector<float> &a, const std::vector<float> &b)
@@ -379,12 +392,55 @@ int main(int argc, char *argv[])
                  [&](const std::string &str)
                  { return str.c_str(); });
 
-  // process non-json input
   std::string input = read_all(); // from stdin
-  auto chunked = split_chunks(input);
-  auto combined = combine_chunks(chunked, min_length);
-  auto vectors = vectorize_all(combined, input_names_char, output_names_char, tok, session);
 
+  // try parsing as newline delimited json. if it fails, do chunking
+  std::vector<std::string> combined;
+  bool json_input = true;
+
+  // NOTE: smart ptr would be preferable but it doesn't seem to work here
+  std::vector<std::shared_ptr<rapidjson::Document>> json_docs;
+  std::vector<InputDocument> docs;
+  
+  try {
+    std::vector<InputDocument> docs_candidate;
+    std::stringstream ss(input);
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (line == "") {
+          break;
+        }
+        auto d = std::shared_ptr<rapidjson::Document>(new rapidjson::Document());
+        d->Parse(line.c_str());
+        if (d->IsNull()) {
+          throw 1;
+        }
+        json_docs.emplace_back(d);
+    }
+    
+    for (int i = 0; i < json_docs.size(); ++i) {
+      rapidjson::Document& d = *json_docs[i];
+      if (!d.HasMember("content") || !d["content"].IsString()) {
+        throw 1;
+      }
+      std::string title = d.HasMember("title") ? std::string(d["title"].GetString()) : "";
+      std::string content = std::string(d["content"].GetString());
+      // TODO handle case when title doesn't exist - content is required
+      combined.push_back( title + "\\n" + content );
+      docs_candidate.push_back(InputDocument{title, content});
+    }
+    docs = docs_candidate;
+  } catch (int e) {
+    json_input = false;
+    // process non-json input
+    auto chunked = split_chunks(input);
+    combined = combine_chunks(chunked, min_length);
+    for (int i = 0; i < combined.size(); ++i) {
+      docs.push_back(InputDocument{"", combined[i]});
+    }
+  }
+  
+  auto vectors = vectorize_all(combined, input_names_char, output_names_char, tok, session);
   auto query_ids = tokenize(query, tok);
   // truncate to max number of tokens
   if (query_ids.size() > input_size)
@@ -394,24 +450,25 @@ int main(int argc, char *argv[])
 
   auto output_tensors = run_onnx(query_ids, input_names_char, output_names_char, session);
   auto v_query = to_vector(output_tensors);
-
   auto distances = calc_distances(v_query, vectors);
 
   // Calculate highlights
   std::vector<float> highlight_scores;
   std::vector<std::string> highlights;
-  std::vector<std::string> selected_chunks;
+  std::vector<size_t> selected_indices;
 
-  for (size_t i = 0; i < std::min(static_cast<size_t>(top_k), distances.first.size()); ++i) {
+  size_t total_chunks = std::min(static_cast<size_t>(top_k), distances.first.size());
+
+  for (size_t i = 0; i < total_chunks; ++i) {
       auto chunk = combined[distances.first[i]];
-      selected_chunks.push_back(chunk);
+      selected_indices.push_back(distances.first[i]);
   }
 
   std::vector<std::string> sentences{};
   std::vector<int> chunk_ids;
 
-  for (size_t i = 0; i < std::min(static_cast<size_t>(top_k), distances.first.size()); ++i) {
-      auto chunk = selected_chunks[i];
+  for (size_t i = 0; i < total_chunks; ++i) {
+      auto chunk = combined[selected_indices[i]];
       // Do another round of search within the text, splitting on sentences
       for (const auto& x : split_sentences(chunk)) {
         if (x.size() > 3) { // TODO better logic/do size filtering somewhere else?
@@ -422,9 +479,9 @@ int main(int argc, char *argv[])
   }
 
   std::vector<std::vector<float>> sentence_vectors = vectorize_all(sentences, input_names_char, output_names_char, tok, session);
-  
+
   // iterate sentence_vectors grouped by chunk_ids:
-  for (size_t i = 0; i <= *std::max_element(std::begin(chunk_ids), std::end(chunk_ids)); ++i) {
+  for (size_t i = 0; i < total_chunks; ++i) {
     std::vector<std::vector<float>> vecs;
     std::vector<std::string> sents;
     for (int j = 0; j < sentence_vectors.size(); ++j) {
@@ -433,9 +490,15 @@ int main(int argc, char *argv[])
             sents.push_back(sentences[j]);
         }
     }
-    auto dists = calc_distances(v_query, vecs);
-    highlight_scores.push_back(dists.second[0]);
-    highlights.push_back(sents[dists.first[0]]);
+
+    if (vecs.size() == 0) {
+      highlight_scores.push_back(-10000); //
+      highlights.push_back("");
+    } else {
+      auto dists = calc_distances(v_query, vecs);
+      highlight_scores.push_back(dists.second[0]);
+      highlights.push_back(sents[dists.first[0]]);
+    }
   }
 
   // sort highlight_scores and reorder highlights by the same sort:
@@ -448,19 +511,38 @@ int main(int argc, char *argv[])
     return left.first > right.first;
   });
 
-  std::vector<float> sorted_highlights_scores;
   std::vector<std::string> sorted_highlights;
-  std::vector<std::string> sorted_selected_chunks;
+  std::vector<size_t> sorted_selected_indices;
 
   for (int i = 0; i < highlight_scores.size(); ++i) {
-    sorted_highlights_scores.push_back(sorted_highlight_scores[i].first);
     sorted_highlights.push_back(highlights[sorted_highlight_scores[i].second]);
-    sorted_selected_chunks.push_back(selected_chunks[sorted_highlight_scores[i].second]);
+    sorted_selected_indices.push_back(selected_indices[sorted_highlight_scores[i].second]);
   }
-  
-  for (int i = 0; i < num_results; i++) {
-      auto content = sorted_selected_chunks[i];
-      auto highlight = sorted_highlights[i];
+
+  size_t result_count = std::min(docs.size(), static_cast<size_t>(num_results));
+  for (int i = 0; i < result_count; i++) {
+    auto title = docs[sorted_selected_indices[i]].title;
+    auto content = docs[sorted_selected_indices[i]].content;
+    auto highlight = sorted_highlights[i];
+
+    if (output_json || json_input) {
+      rapidjson::Document d; // TODO use input doc if it exists
+      rapidjson::Value& v = d.SetObject();
+      rapidjson::Value v_title; // TODO only write highlight if other fields exist
+      v_title.SetString(rapidjson::StringRef(title.c_str()));
+      v.AddMember("title", v_title, d.GetAllocator());
+      rapidjson::Value v_content;
+      v_content.SetString(rapidjson::StringRef(content.c_str()));
+      v.AddMember("content", v_content, d.GetAllocator());
+      rapidjson::Value v_highlight;
+      v_highlight.SetString(rapidjson::StringRef(highlight.c_str()));
+      v.AddMember("highlight", v_highlight, d.GetAllocator());
+
+      rapidjson::StringBuffer buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+      d.Accept(writer);
+      std::cout << buffer.GetString() << std::endl;
+    } else {
       if (highlight_only) {
           std::cout << highlight << std::endl << std::endl;
       } else {
@@ -471,6 +553,7 @@ int main(int argc, char *argv[])
             highlighted = content.replace(pos, highlight.length(), std::string("\033[1m" + highlight + "\033[0m"));
         }
         std::cout << highlighted << std::endl << std::endl;
+      }
     }
   }
 }
