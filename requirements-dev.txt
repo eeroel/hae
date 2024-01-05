@@ -1,0 +1,4 @@
+onnxruntime==1.16.1
+onnx==1.15.0
+txtai==6.1.0
+tokenizers==0.15.0

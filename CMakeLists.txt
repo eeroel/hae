@@ -1,13 +1,30 @@
 
 # Example cmake project
 cmake_minimum_required(VERSION 3.19)
-project(tokenizers_cpp_example C CXX)
+
+project(hae C CXX)
+
+set(CMAKE_MACOSX_RPATH TRUE)
+#SET(CMAKE_SKIP_BUILD_RPATH  FALSE)
+#SET(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+#SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+#SET(CMAKE_INSTALL_RPATH "./")
 
 # include tokenizer cpp as a sub directory
 set(TOKENIZER_CPP_PATH tokenizers-cpp)
 add_subdirectory(${TOKENIZER_CPP_PATH} tokenizers EXCLUDE_FROM_ALL)
 
 add_executable(hae hae.cc)
+
+if(APPLE)
+    set_target_properties(hae PROPERTIES
+        BUILD_WITH_INSTALL_RPATH FALSE
+        LINK_FLAGS "-Wl,-rpath,@loader_path/")
+else()
+    set_target_properties(hae PROPERTIES
+        BUILD_WITH_INSTALL_RPATH FALSE
+        LINK_FLAGS "-Wl,-rpath,$ORIGIN/")
+endif()
 
 include(CheckCXXCompilerFlag)
 if(NOT MSVC)
@@ -46,8 +63,13 @@ target_include_directories(hae PUBLIC "${ONNXRUNTIME_ROOTDIR}/include"          
 
 #target_link_directories(hae PUBLIC "${ONNXRUNTIME_ROOTDIR}/lib")
 
-# TODO don't hardcode lib
-target_link_libraries(hae PUBLIC "${ONNXRUNTIME_ROOTDIR}/lib/libonnxruntime.dylib")
+# TODO don't hardcode lib ? 
+if(APPLE)
+    target_link_libraries(hae PUBLIC "${ONNXRUNTIME_ROOTDIR}/lib/libonnxruntime.dylib")
+else()
+    target_link_libraries(hae PUBLIC "${ONNXRUNTIME_ROOTDIR}/lib/libonnxruntime.so")
+endif()
+
 
 if(WIN32)
   add_library(wil INTERFACE)

@@ -43,10 +43,10 @@
 #include <thread>
 #include <future>
 
-#include "hae.h"
+#include "build/tokenizer.h"
 #include "argparse.hpp"
 
-#include "model.h" // TODO uncomment
+#include "build/model.h"
 
 using tokenizers::Tokenizer;
 
@@ -316,7 +316,7 @@ int main(int argc, char *argv[])
 
     // Note: all the current factory APIs takes in-memory blob as input.
     // This gives some flexibility on how these blobs can be read.
-    auto tok = Tokenizer::FromBlobJSON(tokenizer_json);
+    auto tok = Tokenizer::FromBlobJSON(std::string((const char*)tokenizer_json, tokenizer_json_len));
 
   Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "test");
   const auto &api = Ort::GetApi();
@@ -433,7 +433,12 @@ int main(int argc, char *argv[])
       auto chunk = combined[selected_indices[i]];
       // Do another round of search within the text, splitting on sentences
       for (const auto& x : split_sentences(chunk)) {
-        if (x.size() > 3) { // TODO better logic/do size filtering somewhere else?
+        std::string s = x;
+        s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch) {
+            return !std::isspace(ch);
+        }));
+        
+        if (s.size() > 3) { // TODO better logic/do size filtering somewhere else?
           sentences.push_back(x);
           chunk_ids.push_back(i);
         }
