@@ -1,14 +1,9 @@
-
 # Example cmake project
 cmake_minimum_required(VERSION 3.19)
 
 project(hae C CXX)
 
 set(CMAKE_MACOSX_RPATH TRUE)
-#SET(CMAKE_SKIP_BUILD_RPATH  FALSE)
-#SET(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-#SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
-#SET(CMAKE_INSTALL_RPATH "./")
 
 # include tokenizer cpp as a sub directory
 set(TOKENIZER_CPP_PATH tokenizers-cpp)
@@ -53,10 +48,6 @@ else()
   endif()
 endif()
 
-# The ORT package has a different include directory structure to a local install via cmake.
-# We added the path for the pre-built package above. Add the path for a local install to support either usage.
-# TODO: If we want to support additional EPs being loadable from a local install we also need to add EP specific
-# directories under /include/onnxruntime/core/providers
 target_include_directories(hae PUBLIC "${ONNXRUNTIME_ROOTDIR}/include"                           # Pre-built package
                     "${ONNXRUNTIME_ROOTDIR}/include/onnxruntime"               # Linux local install to /usr/local
                     "${ONNXRUNTIME_ROOTDIR}/include/onnxruntime/core/session") # Windows local install

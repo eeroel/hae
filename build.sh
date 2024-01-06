@@ -53,6 +53,9 @@ cd ..
 
 mkdir -p dist
 cp build/hae dist
+cp LICENSE dist
+cp NOTICES dist
+
 if [[ "$target" != "linux-x64" ]]; then
     cp build/onnxruntime-$target-1.16.3/lib/libonnxruntime-1.16.3.dylib dist/
 fi

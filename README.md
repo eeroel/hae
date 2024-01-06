@@ -15,8 +15,6 @@ Example:
 
 Try it with some text on the clipboard, an RSS feed converted to JSON, or with a cup of coffee ☕ and a nice book 📖 from Project Gutenberg!
 
-_Disclaimer: This is alpha quality software so use it at your own risk!_
-
 ## Features:
 - Highlighting best-matching sentences, which makes it easier to quickly evaluate the results.
 - Optional JSON input and output. Input is automatically interpreted as JSON if it is in the "JSON lines" format, one object per line, and each object contains a field `content`. If a `title` field is present, it will also be used for the search. **Only JSON lines format is supported for input.**
@@ -49,7 +47,7 @@ docker run -it -v./dist-linux-x64:/app/dist --platform linux/amd64 hae bash -c '
 ```
 
 ## Acknowledgements
-- This project is only possible due to SentenceTransformers https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+- This project is only possible thanks to SentenceTransformers https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
 - ONNX Runtime for efficient CPU inferencing https://onnxruntime.ai/
 - HuggingFace Tokenizers via a C++ wrapper https://github.com/mlc-ai/tokenizers-cpp
 - https://github.com/p-ranav/argparse for creating the CLI
