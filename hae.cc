@@ -1,3 +1,5 @@
+#define HAE_VERSION "0.1.0"
+
 #include <tokenizers_cpp.h>
 #include <onnxruntime_cxx_api.h>
 #include "rapidjson/document.h"
@@ -263,7 +265,7 @@ std::vector<std::vector<float>> vectorize_all(
 
 int main(int argc, char *argv[])
 {
-    argparse::ArgumentParser parser("hae");
+    argparse::ArgumentParser parser("hae", version=HAE_VERSION);
     // Assuming `parser` is an existing object
     parser.add_argument("query").help("The query");
     parser.add_argument("-n").help("Number of results to return").scan<'i',int>().default_value(5);
