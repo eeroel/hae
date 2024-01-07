@@ -24,7 +24,7 @@ wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/
 wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json?download=true -O all-MiniLM-L6-v2/tokenizer.json
 wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json?download=true -O all-MiniLM-L6-v2/config.json
 
-if [[ "$target" != "linux-x64" ]]; then
+if [[ -z "${RUNNING_IN_DOCKER-}" ]]; then
     python3.10 -m venv create venv && source venv/bin/activate
     pip install -r ../requirements-dev.txt
 fi
@@ -32,7 +32,6 @@ fi
 python ../export_model_onnx.py
 
 xxd -i all-MiniLM-L6-v2.onnx > model.h
-
 
 input_size=128  # NOTE: model specific config - read from model files if possible
 output_size=384
@@ -42,13 +41,18 @@ echo -e "#pragma once\nauto input_size=$input_size;\nauto output_size=$output_si
 jq -c 'del(.truncation, .padding)' all-MiniLM-L6-v2/tokenizer.json > tokenizer.json
 xxd -i tokenizer.json >> tokenizer.h
 
-if [[ "$target" == "linux-x64" ]]; then
-    source $HOME/.cargo/env
-    rustup default 1.71.0 && rustup toolchain remove stable
+if [[ -v RUNNING_IN_DOCKER ]]; then
+    # TODO does this do anything? an attempt to fix the flakiness of the build
+    source $HOME/.cargo/env && rustup default 1.71.0 && rustup toolchain remove stable
 fi
 
 cmake .. -DONNXRUNTIME_ROOTDIR=$PWD/onnxruntime-$target-1.16.3 -DCMAKE_BUILD_TYPE=Release
 make -j8
+
+if [[ -z "${RUNNING_IN_DOCKER-}" ]]; then
+    deactivate
+fi
+
 cd ..
 
 mkdir -p dist
@@ -57,13 +61,9 @@ cp LICENSE dist
 cp NOTICES dist
 
 if [[ "$target" != "linux-x64" ]]; then
-    cp build/onnxruntime-$target-1.16.3/lib/libonnxruntime-1.16.3.dylib dist/
+    cp build/onnxruntime-$target-1.16.3/lib/libonnxruntime.1.16.3.dylib dist/
 fi
 
 if [[ "$target" == "linux-x64" ]]; then
     cp build/onnxruntime-$target-1.16.3/lib/libonnxruntime.so.1.16.3 dist/
-fi
-
-if [[ "$target" != "linux-x64" ]]; then
-    deactivate
 fi

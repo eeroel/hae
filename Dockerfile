@@ -6,8 +6,7 @@ RUN apt install -y xxd
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 RUN apt install -y curl
-RUN curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain nightly -y
-RUN . $HOME/.cargo/env && rustup default 1.71.0 && rustup toolchain remove stable
+RUN curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain 1.71.0 -y
 RUN apt install -y clang
 
 ADD requirements-dev.txt /app/requirements-dev.txt
@@ -21,5 +20,8 @@ ADD argparse.hpp /app/argparse.hpp
 ADD rapidjson /app/rapidjson
 ADD tokenizers-cpp /app/tokenizers-cpp
 ADD CMakeLists.txt /app/CMakeLists.txt
+ADD LICENSE /app/LICENSE
+ADD NOTICES /app/NOTICES
+ENV RUNNING_IN_DOCKER=1
 
 WORKDIR /app
