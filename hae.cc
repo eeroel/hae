@@ -211,19 +211,24 @@ std::vector<Ort::Value> run_onnx(
     return output_tensors;
 }
 
-std::vector<std::vector<float>> vectorize_all(
+std::vector<std::vector<std::vector<int>>> tokenize_all(
   std::vector<std::string> &input,
-  std::vector<const char *> &input_names_char,
-  std::vector<const char *> &output_names_char,
-  std::unique_ptr<tokenizers::Tokenizer> &tok,
-  Ort::Session &session
-  ) {
+  std::unique_ptr<tokenizers::Tokenizer> &tok
+) {
   std::vector<std::vector<std::vector<int>>> inputs;
   for (auto &c : input) {
       auto input = build_inputs(c, tok);
       inputs.push_back(input);
   }
+  return inputs;
+}
 
+std::vector<std::vector<float>> vectorize_all_batch(
+  std::vector<std::vector<std::vector<int>>> &inputs,
+  std::vector<const char *> &input_names_char,
+  std::vector<const char *> &output_names_char,
+  Ort::Session &session
+  ) {
   std::vector<std::vector<std::future<std::vector<Ort::Value>>>> futures;
 
   for (auto &sub_chunks: inputs)
@@ -232,7 +237,7 @@ std::vector<std::vector<float>> vectorize_all(
     for (auto &ids: sub_chunks)
     {
       subfutures.emplace_back(
-          std::async([&]()
+          std::async(std::launch::async, [&]()
             {
               return run_onnx(ids, input_names_char, output_names_char, session);
             })
@@ -262,6 +267,40 @@ std::vector<std::vector<float>> vectorize_all(
   }
   return vectors;
 }
+
+std::vector<std::vector<float>> vectorize_all(
+  std::vector<std::vector<std::vector<int>>> &inputs,
+  std::vector<const char *> &input_names_char,
+  std::vector<const char *> &output_names_char,
+  Ort::Session &session
+  ) {
+    std::vector<std::vector<float>> results;
+    // iterate over `inputs` in batches of batch_size:
+    // the idea here is to limit the amount of threads created by async.
+    // not optimal but seems to work OK
+    int batch_size = 128; // upper limit on number of threads used
+    auto num_batches = static_cast<int>(inputs.size()/batch_size) + 1;
+    for (int i = 0; i < num_batches; ++i) {
+      // take next batch:
+      std::vector<std::vector<std::vector<int>>> batch;
+      if (i < num_batches-1) {
+        std::vector<std::vector<std::vector<int>>> batch(inputs.begin() + i*batch_size, inputs.begin() + (i+1)*batch_size);
+        auto batch_result = vectorize_all_batch(batch, input_names_char, output_names_char, session);
+        for (auto &res : batch_result)
+        {
+            results.push_back(res);
+        }
+      } else {
+        std::vector<std::vector<std::vector<int>>> batch(inputs.begin() + i*batch_size, inputs.end());
+        auto batch_result = vectorize_all_batch(batch, input_names_char, output_names_char, session);
+        for (auto &res : batch_result)
+        {
+            results.push_back(res);
+        }
+      }
+    }
+    return results;
+  }
 
 int main(int argc, char *argv[])
 {
@@ -297,7 +336,7 @@ int main(int argc, char *argv[])
   const auto &api = Ort::GetApi();
 
   Ort::SessionOptions session_options;
-  session_options.SetIntraOpNumThreads(3);
+  session_options.SetIntraOpNumThreads(1);
   session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
   Ort::Session session(env, all_MiniLM_L6_v2_onnx, sizeof(all_MiniLM_L6_v2_onnx), session_options);
@@ -376,8 +415,9 @@ int main(int argc, char *argv[])
       docs.push_back(InputDocument{"", combined[i]});
     }
   }
-  
-  auto vectors = vectorize_all(combined, input_names_char, output_names_char, tok, session);
+
+  auto tokens = tokenize_all(combined, tok);
+  auto vectors = vectorize_all(tokens, input_names_char, output_names_char, session);
   auto query_ids = tokenize(query, tok);
   // truncate to max number of tokens
   if (query_ids.size() > input_size)
@@ -420,7 +460,8 @@ int main(int argc, char *argv[])
       }
   }
 
-  std::vector<std::vector<float>> sentence_vectors = vectorize_all(sentences, input_names_char, output_names_char, tok, session);
+  auto sentence_tokens = tokenize_all(sentences, tok);
+  std::vector<std::vector<float>> sentence_vectors = vectorize_all(sentence_tokens, input_names_char, output_names_char, session);
 
   // iterate sentence_vectors grouped by chunk_ids:
   for (size_t i = 0; i < total_chunks; ++i) {
