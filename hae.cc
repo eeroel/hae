@@ -131,7 +131,11 @@ std::vector<std::string> split_sentences(const std::string& text) {
 
 
 std::vector<int> tokenize(const std::string &s, std::unique_ptr<tokenizers::Tokenizer> &tok) {
-   auto tokens = tok->Encode(s);
+   // TODO: see if this can be improved:
+   // we prepend the special [CLS] token here because of a hunch
+   // that it's required for the model (first token gets ignored)
+   // Might be that with a different ONNX export this is not required
+   auto tokens = tok->Encode("[CLS]" + s);
    int i = tokens.size();
    while (i > 0 && tokens[i-1] == 0) {
       --i;
