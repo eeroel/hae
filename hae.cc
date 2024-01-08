@@ -308,7 +308,7 @@ int main(int argc, char *argv[])
     // Assuming `parser` is an existing object
     parser.add_argument("query").help("The query");
     parser.add_argument("-n").help("Number of results to return").scan<'i',int>().default_value(5);
-    parser.add_argument("--num_candidates").help("Number of candidate chunks() to consider, default is 5*n or at least 30").scan<'i',int>().default_value(-1);
+    parser.add_argument("--num_candidates").help("Number of candidate chunks to consider, default is 5*n or at least 30").scan<'i',int>().default_value(-1);
     parser.add_argument("-ml", "--min_length").help("Minimum chunk length in characters").scan<'i',int>().default_value(512);
     parser.add_argument("-j", "--json").help("Output in JSON format").default_value(false).implicit_value(true);
     parser.add_argument("-hl", "--highlight_only").help("Display only highlights").default_value(false).implicit_value(true);
