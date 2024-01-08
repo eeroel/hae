@@ -1,4 +1,4 @@
-#define HAE_VERSION "0.1.0"
+#define HAE_VERSION "0.1.1"
 
 #include <tokenizers_cpp.h>
 #include <onnxruntime_cxx_api.h>

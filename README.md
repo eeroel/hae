@@ -13,17 +13,17 @@ Example:
      pathname.
 ```
 
-Try it with some text on the clipboard, an RSS feed converted to JSON, or with a cup of coffee ☕ and a nice book 📖 from Project Gutenberg!
+`hae` is best suited for use cases where your input text contains up to thousands of paragraphs. Try it with some text on the clipboard, an RSS feed converted to JSON, or with a cup of coffee ☕ and a nice book 📖 from Project Gutenberg!
 
 ## Features
-- Highlighting best-matching sentences, which makes it easier to quickly evaluate the results.
-- Optional JSON input and output. Input is automatically interpreted as JSON if it is in the "JSON lines" format, one object per line, and each object contains a field `content`. If a `title` field is present, it will also be used for the search. **Only JSON lines format is supported for input.**
+- Highlights best-matching sentences, which makes it easy to quickly evaluate the results.
+- Optional JSON input and output. Input is automatically interpreted as JSON if it is in the "JSON lines" format, one object per line, and each object contains a field `content`. If a `title` field is present, it will also be used for the search.
 
 ## Installation
 For Linux and Apple Silicon Macs you can download a prebuilt binary. You can also build from source as described below.
 
 ### Build from source
-The repo contains a build script that also downloads the embedding model and converts it to ONNX format using Python libraries. So you will need some tools installed. For Linux, it's highly recommended to use the Docker image to build (see below).
+The repo contains a build script that also downloads the SentenceTransformers embedding model and converts it to ONNX format using Python libraries. So you will need some tools installed. For Linux, it's highly recommended to use the Docker image to build (see below).
 
 - cmake
 - clang
