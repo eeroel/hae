@@ -35,6 +35,7 @@ The repo contains a build script that also downloads the SentenceTransformers em
 
 If you are building for Linux, please run the build script with a Python virtual environment activated.
 
+First fetch the git submodules: `git submodule update --init --recursive --depth=1`
 `./build.sh $ARCH` where `$ARCH` is one of the following: osx-arm64, linux-x64, osx-x86_64
 
 The application and the ONNX runtime dynamic library required to run it will be found under `./dist`.
