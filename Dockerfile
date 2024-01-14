@@ -2,9 +2,6 @@ FROM python:3.10-slim
 RUN apt update && apt install -y wget jq && apt install -y g++
 RUN apt install -y xxd
 
-# this so that we don't get CUDA ...
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
 RUN apt install -y curl
 RUN curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain 1.71.0 -y
 

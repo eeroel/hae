@@ -26,6 +26,8 @@ wget -q https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/ma
 
 if [[ -z "${RUNNING_IN_DOCKER-}" ]]; then
     python3.10 -m venv venv && source venv/bin/activate
+    # this is to avoid downloading cuda
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
     pip install -r ../requirements-dev.txt
 fi
 
