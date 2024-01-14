@@ -131,7 +131,6 @@ target_link_libraries(
   libabsl_base.a
   libabsl_log_severity.a
   libabsl_malloc_internal.a
-  libabsl_raw_logging_internal.a
   libabsl_spinlock_wait.a
   libabsl_throw_delegate.a
   libabsl_hashtablez_sampler.a
@@ -148,6 +147,7 @@ target_link_libraries(
   libabsl_cordz_info.a
   libabsl_strings.a
   libabsl_strings_internal.a
+  libabsl_raw_logging_internal.a
   libabsl_graphcycles_internal.a
   libabsl_synchronization.a
   libabsl_civil_time.a
