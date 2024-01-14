@@ -22,7 +22,16 @@ else()
 endif()
 
 add_custom_command(
-    OUTPUT ${DEPS}/libonnxruntime_session.a
+    OUTPUT
+    ${DEPS}/libonnxruntime_session.a
+    ${DEPS}/libonnxruntime_optimizer.a
+    ${DEPS}/libonnxruntime_providers.a
+    ${DEPS}/libonnxruntime_util.a
+    ${DEPS}/libonnxruntime_framework.a
+    ${DEPS}/libonnxruntime_graph.a
+    ${DEPS}/libonnxruntime_mlas.a
+    ${DEPS}/libonnxruntime_common.a
+    ${DEPS}/libonnxruntime_flatbuffers.a
     WORKING_DIRECTORY ${ONNXRUNTIME_PATH}
     COMMAND ./build.sh --config Release --parallel --cmake_extra_defines FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER --allow_running_as_root
 )
