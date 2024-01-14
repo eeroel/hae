@@ -16,7 +16,7 @@ cd build
 
 # clone onnxruntime; use main for now to avoid cmake version issues
 #git clone -b rel-1.16.3 --single-branch https://github.com/microsoft/onnxruntime.git --depth 1
-git clone https://github.com/microsoft/onnxruntime.git --depth 1
+git clone -b main https://github.com/microsoft/onnxruntime.git --depth 1 --single-branch || true
 
 # fetch model
 mkdir -p all-MiniLM-L6-v2
@@ -25,7 +25,7 @@ wget -q https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/ma
 wget -q https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json?download=true -O all-MiniLM-L6-v2/config.json
 
 if [[ -z "${RUNNING_IN_DOCKER-}" ]]; then
-    python3.10 -m venv create venv && source venv/bin/activate
+    python3.10 -m venv venv && source venv/bin/activate
     pip install -r ../requirements-dev.txt
 fi
 

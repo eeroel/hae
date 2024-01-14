@@ -151,8 +151,8 @@ target_link_libraries(
   libonnx.a
   libonnx_proto.a
   libprotobuf-lite.a
-  libprotobuf.a
-  libprotoc.a
+  #libprotobuf.a
+  #libprotoc.a
   libcpuinfo.a
   libclog.a
   libre2.a
