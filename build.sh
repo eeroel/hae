@@ -14,18 +14,20 @@ target=$1
 mkdir -p build
 cd build
 
-# fetch onnx runtime
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-$target-1.16.3.tgz -O onnxruntime-$target-1.16.3.tgz
-tar -xvf ./onnxruntime-$target-1.16.3.tgz
+# clone onnxruntime; use main for now to avoid cmake version issues
+#git clone -b rel-1.16.3 --single-branch https://github.com/microsoft/onnxruntime.git --depth 1
+git clone -b main https://github.com/microsoft/onnxruntime.git --depth 1 --single-branch || true
 
 # fetch model
 mkdir -p all-MiniLM-L6-v2
-wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/pytorch_model.bin?download=true -O all-MiniLM-L6-v2/pytorch_model.bin
-wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json?download=true -O all-MiniLM-L6-v2/tokenizer.json
-wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json?download=true -O all-MiniLM-L6-v2/config.json
+wget -q https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/pytorch_model.bin?download=true -O all-MiniLM-L6-v2/pytorch_model.bin
+wget -q https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json?download=true -O all-MiniLM-L6-v2/tokenizer.json
+wget -q https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json?download=true -O all-MiniLM-L6-v2/config.json
 
 if [[ -z "${RUNNING_IN_DOCKER-}" ]]; then
-    python3.10 -m venv create venv && source venv/bin/activate
+    python3.10 -m venv venv && source venv/bin/activate
+    # this is to avoid downloading cuda
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
     pip install -r ../requirements-dev.txt
 fi
 
@@ -41,12 +43,12 @@ echo -e "#pragma once\nauto input_size=$input_size;\nauto output_size=$output_si
 jq -c 'del(.truncation, .padding)' all-MiniLM-L6-v2/tokenizer.json > tokenizer.json
 xxd -i tokenizer.json >> tokenizer.h
 
-if [[ -v RUNNING_IN_DOCKER ]]; then
+if [ -n "$RUNNING_IN_DOCKER" ]; then
     # TODO does this do anything? an attempt to fix the flakiness of the build
     source $HOME/.cargo/env && rustup default 1.71.0 && rustup toolchain remove stable
 fi
 
-cmake .. -DONNXRUNTIME_ROOTDIR=$PWD/onnxruntime-$target-1.16.3 -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j8
 
 if [[ -z "${RUNNING_IN_DOCKER-}" ]]; then
@@ -59,11 +61,3 @@ mkdir -p dist
 cp build/hae dist
 cp LICENSE dist
 cp NOTICES dist
-
-if [[ "$target" != "linux-x64" ]]; then
-    cp build/onnxruntime-$target-1.16.3/lib/libonnxruntime.1.16.3.dylib dist/
-fi
-
-if [[ "$target" == "linux-x64" ]]; then
-    cp build/onnxruntime-$target-1.16.3/lib/libonnxruntime.so.1.16.3 dist/
-fi

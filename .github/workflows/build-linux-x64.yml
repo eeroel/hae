@@ -1,0 +1,24 @@
+name: Build - Linux x64
+run-name: ${{ github.actor }} building `hae` for Linux x64
+on: [push]
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: Log tool versions
+        run: |
+          cmake --version
+          rustc --version
+      - name: Build
+        run: |
+          git submodule update --init --recursive --depth=1
+          ./build.sh linux-x64
+      - name: Package
+        uses: actions/upload-artifact@v3
+        with:
+          name: hae-linux-x64
+          path: |
+            dist/*
+      - run: echo "Status ${{ job.status }}."

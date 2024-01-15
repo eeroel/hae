@@ -25,9 +25,9 @@ For Linux and Apple Silicon Macs you can download a prebuilt binary. You can als
 ### Build from source
 The repo contains a build script that also downloads the SentenceTransformers embedding model and converts it to ONNX format using Python libraries. So you will need some tools installed. For Linux, it's highly recommended to use the Docker image to build (see below).
 
-- cmake
+- cmake (tested to work with 3.28.1)
 - clang
-- rust (tested to work with 1.71.0, required for Tokenizers dependency)
+- rust (tested to work with 1.75.0, required for Tokenizers dependency)
 - wget (for fetching ONNX runtime and model files)
 - xxd (for embedding model files in headers)
 - jq (for preprocessing the tokenizer config file)
@@ -35,9 +35,12 @@ The repo contains a build script that also downloads the SentenceTransformers em
 
 If you are building for Linux, please run the build script with a Python virtual environment activated.
 
+The build steps are as follows:
+- First fetch the git submodules: `git submodule update --init --recursive --depth=1`.
+- Then run the build:
 `./build.sh $ARCH` where `$ARCH` is one of the following: osx-arm64, linux-x64, osx-x86_64
 
-The application and the ONNX runtime dynamic library required to run it will be found under `./dist`.
+The application will be found under `./dist`.
 
 ### Build from source (Docker)
 ```
