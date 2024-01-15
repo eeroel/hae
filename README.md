@@ -15,6 +15,8 @@ Example:
 
 `hae` is best suited for use cases where your input text contains up to thousands of paragraphs. Try it with some text on the clipboard, an RSS feed converted to JSON, or with a cup of coffee ☕ and a nice book 📖 from Project Gutenberg!
 
+_Disclaimer: `hae` is experimental software intended primarily for interactive use, and should not be considered ready for production applications._
+
 ## Features
 - Highlights best-matching sentences, which makes it easy to quickly evaluate the results.
 - Optional JSON input and output. Input is automatically interpreted as JSON if it is in the "JSON lines" format, one object per line, and each object contains a field `content`. If a `title` field is present, it will also be used for the search.
@@ -23,28 +25,23 @@ Example:
 For Linux and Apple Silicon Macs you can download a prebuilt binary. You can also build from source as described below.
 
 ### Build from source
-The repo contains a build script that also downloads the SentenceTransformers embedding model and converts it to ONNX format using Python libraries. So you will need some tools installed. For Linux, it's highly recommended to use the Docker image to build (see below).
+The repo contains a build script that also downloads the SentenceTransformers embedding model and converts it to ONNX format using Python libraries. So you will need some tools installed.
 
-- cmake
+- cmake (tested to work with 3.28.1)
 - clang
-- rust (tested to work with 1.71.0, required for Tokenizers dependency)
+- rust (tested to work with 1.75.0, required for Tokenizers dependency)
 - wget (for fetching ONNX runtime and model files)
 - xxd (for embedding model files in headers)
 - jq (for preprocessing the tokenizer config file)
 - Python (3.10)
 
-If you are building for Linux, please run the build script with a Python virtual environment activated.
-
+The build steps are as follows:
+- First fetch the git submodules: `git submodule update --init --recursive --depth=1`.
+- Then run the build:
 `./build.sh $ARCH` where `$ARCH` is one of the following: osx-arm64, linux-x64, osx-x86_64
 
 The application and the ONNX runtime dynamic library required to run it will be found under `./dist`.
 
-### Build from source (Docker)
-```
-mkdir dist-linux-x64
-docker build --platform linux/amd64 -t hae:latest .
-docker run -it -v./dist-linux-x64:/app/dist --platform linux/amd64 hae bash -c './build.sh linux-x64'
-```
 
 ## Acknowledgements
 - This project is only possible thanks to SentenceTransformers https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
