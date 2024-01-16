@@ -15,6 +15,7 @@ jobs:
         run: |
           git submodule update --init --recursive --depth=1
           ./build.sh linux-x64
+          test/run_tests.sh
       - name: Package
         uses: actions/upload-artifact@v3
         with:

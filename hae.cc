@@ -515,21 +515,30 @@ int main(int argc, char *argv[])
     auto highlight = sorted_highlights[i];
 
     if (output_json || json_input) {
-      rapidjson::Document d; // TODO use input doc if it exists
-      rapidjson::Value& v = d.SetObject();
+      std::shared_ptr<rapidjson::Document> d;
+      if (json_docs.size() == 0) {
+        d = std::shared_ptr<rapidjson::Document>(new rapidjson::Document());
+        d->SetObject();
+      } else {
+        d = json_docs[sorted_selected_indices[i]];
+      }
+      rapidjson::Value& v = *d;
+
       rapidjson::Value v_title; // TODO only write highlight if other fields exist
-      v_title.SetString(rapidjson::StringRef(title.c_str()));
-      v.AddMember("title", v_title, d.GetAllocator());
-      rapidjson::Value v_content;
-      v_content.SetString(rapidjson::StringRef(content.c_str()));
-      v.AddMember("content", v_content, d.GetAllocator());
+      if (json_docs.size() == 0) {
+        v_title.SetString(rapidjson::StringRef(title.c_str()));
+        v.AddMember("title", v_title, d->GetAllocator());
+        rapidjson::Value v_content;
+        v_content.SetString(rapidjson::StringRef(content.c_str()));
+        v.AddMember("content", v_content, d->GetAllocator());
+      }
       rapidjson::Value v_highlight;
       v_highlight.SetString(rapidjson::StringRef(highlight.c_str()));
-      v.AddMember("highlight", v_highlight, d.GetAllocator());
+      v.AddMember("highlight", v_highlight, d->GetAllocator());
 
       rapidjson::StringBuffer buffer;
       rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-      d.Accept(writer);
+      d->Accept(writer);
       std::cout << buffer.GetString() << std::endl;
     } else {
       if (highlight_only) {
