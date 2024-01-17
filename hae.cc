@@ -74,7 +74,14 @@ std::string read_all()
     std::ios::sync_with_stdio(false);
     std::stringstream ss;
     std::string s;
-    
+
+    // ignore leading newlines
+    while (std::getline(std::cin, s) && s.empty()) {
+        if (!s.empty()) {
+            ss << s << '\n';
+        }
+    }
+
     while (std::getline(std::cin, s)) {
         ss << s << '\n';
     }
