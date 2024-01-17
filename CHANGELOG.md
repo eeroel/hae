@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.4] - 2024-01-17
+- Fix bug causing no output when input starts with a newline
+
+## [0.1.3] - 2024-01-16
+- New build, no functional changes
+
 ## [0.1.2] - 2024-01-08
 - Fix bug causing first words/tokens to be ignored
 
