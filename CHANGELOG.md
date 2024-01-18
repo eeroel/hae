@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.1.5] - 2024-01-18
+- A proper fix for the bug fixed in 0.1.4
+
 ## [0.1.4] - 2024-01-17
 - Fix bug causing no output when input starts with a newline
 
