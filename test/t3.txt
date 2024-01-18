@@ -1,3 +1,4 @@
-[1mThis is a test
+[1m﻿
+This is a test
 [0m
 

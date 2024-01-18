@@ -75,13 +75,6 @@ std::string read_all()
     std::stringstream ss;
     std::string s;
 
-    // ignore leading newlines
-    while (std::getline(std::cin, s) && s.empty()) {
-        if (!s.empty()) {
-            ss << s << '\n';
-        }
-    }
-
     while (std::getline(std::cin, s)) {
         ss << s << '\n';
     }
@@ -392,9 +385,6 @@ int main(int argc, char *argv[])
     std::stringstream ss(input);
     std::string line;
     while (std::getline(ss, line)) {
-        if (line == "") {
-          break;
-        }
         auto d = std::shared_ptr<rapidjson::Document>(new rapidjson::Document());
         d->Parse(line.c_str());
         if (d->IsNull()) {
