@@ -94,7 +94,7 @@ std::vector<std::string> combine_chunks(std::vector<std::string> &chunks, int64_
 
     std::string buffer = "";
     for (size_t i = 0; i < chunks.size(); ++i) {
-        buffer += chunks[i] + "\n";
+        buffer += chunks[i] + "\n\n";
         // If the chunk has multiple lines, just append it
         if (buffer.length() > min_size) {
             combined.push_back(buffer.substr(0, buffer.length() - 1));
@@ -111,7 +111,9 @@ std::vector<std::string> combine_chunks(std::vector<std::string> &chunks, int64_
 
 std::vector<std::string> split_sentences(const std::string& text) {
     std::string wiki_citation_re = "(\\^\\[[0-9]+\\])*";
-    std::regex full_re(":\\n" + wiki_citation_re + "|[.!?]" + wiki_citation_re + "\\s");
+    std::string double_newline_re = "\r?\n\r?\n";
+
+    std::regex full_re(":\\n" + wiki_citation_re + "|[.!?]" + wiki_citation_re + "\\s" + "|" + double_newline_re);
     size_t prev = 0;
     std::vector<std::string> sentences;
 

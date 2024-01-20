@@ -25,3 +25,6 @@ cmp t4.txt res_t4.txt
 
 cat data/empty_start.txt | $HAE_PATH/hae "foo" > res_t5.txt
 cmp t5.txt res_t5.txt
+
+cat data/short_paragraphs.txt | $HAE_PATH/hae "a door" > res_t6.txt
+cmp t6.txt res_t6.txt
